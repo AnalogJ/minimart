@@ -16,14 +16,19 @@ module Minimart
       def initialize(directory_path)
         @directory_path = directory_path
         @cookbooks      = {}
+        @metadata = {}
 
         load_local_inventory
+
       end
 
       # :nodoc:
       def add_cookbook_to_store(name, version)
         cookbooks[name] ||= []
         cookbooks[name] << version
+
+        metadata[name] ||= {}
+        metadata[name][version] = read_download_data("#{name}-#{version}")
       end
 
       # Copy a given cookbook to the local store, and record any metadata
@@ -45,6 +50,28 @@ module Minimart
           cookbooks[cookbook_name].include?(cookbook_version))
       end
 
+      def cookbook_for_requirement(requirement)
+        # if this is a branch, we can't assume that the commit is the same (remote could have changed)
+        return nil if requirement.matching_source?('git') && requirement.branch
+
+        @metadata.each{ |cookbook, versions|
+
+          versions.each{ |version, metadata|
+            if metadata['source_type'] == 'git' &&
+              metadata['location'] == requirement.location &&
+              (
+                (metadata['commitish_type'] == 'ref' && metadata['commitish'] == requirement.ref) ||
+                (metadata['commitish_type'] == 'tag' && metadata['commitish'] == requirement.tag)
+              )
+              return "#{cookbook}-#{version}"
+
+              #todo: support other requirement types
+            end
+          }
+        }
+        return nil
+      end
+
       # Validate that a new resolved requirement is not in the local store
       # with different requirements. If we download two different branches
       # of the same cookbook and they both resolve to the same version, then we
@@ -64,6 +91,7 @@ module Minimart
       private
 
       attr_reader :cookbooks
+      attr_reader :metadata
 
       def copy_cookbook(source, destination)
         FileUtils.rm_rf(destination) if Dir.exists?(destination)
@@ -100,6 +128,10 @@ module Minimart
 
       def write_download_data(cookbook, download_data = {})
         Minimart::Mirror::DownloadMetadata.new(local_path_for(cookbook)).write(download_data)
+      end
+
+      def read_download_data(cookbook)
+        Minimart::Mirror::DownloadMetadata.new(local_path_for(cookbook))
       end
 
     end
